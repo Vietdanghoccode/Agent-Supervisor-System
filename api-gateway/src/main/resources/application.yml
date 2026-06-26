@@ -1,0 +1,13 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      routes:
+        - id: user-service-route
+          uri: http://user-service:80
+          predicates:
+            - Path=/api/user/**
