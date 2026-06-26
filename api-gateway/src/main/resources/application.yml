@@ -11,3 +11,7 @@ spring:
           uri: http://user-service:80
           predicates:
             - Path=/api/user/**
+        - id: auth-service-route
+          uri: http://auth-service:8081
+          predicates:
+            - Path=/api/auth/**
