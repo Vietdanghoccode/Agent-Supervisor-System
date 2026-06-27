@@ -13,3 +13,7 @@ jwt:
 app:
   user-service:
     url: ${USER_SERVICE_URL:http://user-service:8082}
+
+springdoc:
+  api-docs:
+    path: /api/auth/v3/api-docs

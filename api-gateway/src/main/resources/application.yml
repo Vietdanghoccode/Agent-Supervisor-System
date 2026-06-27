@@ -15,3 +15,11 @@ spring:
           uri: http://${AUTH_SERVICE_HOST:auth-service}:${AUTH_SERVICE_PORT:8081}
           predicates:
             - Path=/api/auth/**
+
+springdoc:
+  swagger-ui:
+    urls:
+      - name: user-service
+        url: /api/user/v3/api-docs
+      - name: auth-service
+        url: /api/auth/v3/api-docs
