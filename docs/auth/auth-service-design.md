@@ -1,22 +1,29 @@
 # Auth Service Design
 
 ## Overview
-The `auth-service` is responsible for authenticating users and issuing JSON Web Tokens (JWT). It provides both an Access Token (short-lived) and a Refresh Token (long-lived) to securely manage user sessions across the microservices architecture.
+The `auth-service` is responsible for authenticating users and issuing JSON Web Tokens (JWT). It provides both an Access Token (short-lived) and a Refresh Token (long-lived) to securely manage user sessions across the microservices architecture. It delegates the retrieval of user credentials and roles to the `user-service`.
 
 ## Technologies Used
-- **Spring Boot 3.5.4**: Core framework
+- **Spring Boot**: Core framework
 - **Java 17**: Runtime environment
-- **Spring Security**: For basic endpoint security configuration
+- **Spring Security**: For endpoint security configuration and BCrypt password matching
 - **jjwt (JSON Web Token for Java)**: For creating and verifying JWTs
+- **Spring RestClient**: For synchronous inter-service communication with `user-service`
 
-## Token Strategy
-- **Access Token**: Contains user identity claims. It is short-lived (e.g., 1 hour) to minimize the risk if compromised.
-- **Refresh Token**: Used to obtain a new Access Token without requiring the user to log in again. It is long-lived (e.g., 24 hours).
+## Token Strategy & RBAC
+- **Access Token**: Contains user identity claims including `userId` and `role`. It is short-lived (e.g., 1 hour).
+- **Refresh Token**: Used to obtain a new Access Token. It is long-lived (e.g., 24 hours).
+- **Role-Based Access Control (RBAC)**: Upon successful authentication, the token is populated with a `role` claim mapped from `roleId` in the `user-service`:
+  - `1` -> `customer`
+  - `2` -> `agent`
+  - `3` -> `supervisor`
+  
+Other microservices (like Chat Service or Agent State Service) decode this JWT to authorize specific API actions based on the user's role.
 
 ## Endpoints
 
 ### 1. `POST /api/auth/login`
-Authenticates a user and returns both an access token and a refresh token.
+Authenticates a user against the `user-service` database and returns an access token and refresh token containing their user ID and role.
 
 **Request Body:**
 ```json
