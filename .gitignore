@@ -47,3 +47,5 @@ build/
 *.zip
 *.tar.gz
 *.rar
+docs/postman/agent-supervisor-api.postman_collection.json
+docs/postman/test-api-curl.sh
