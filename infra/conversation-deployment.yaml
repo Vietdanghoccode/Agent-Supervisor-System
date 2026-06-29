@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: conversation-postgres-secret
+type: Opaque
+stringData:
+  username: postgres
+  password: password
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: conversation-postgres-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conversation-postgres
+  labels:
+    app: conversation-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: conversation-postgres
+  template:
+    metadata:
+      labels:
+        app: conversation-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: conversation_db
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: conversation-postgres-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: conversation-postgres-secret
+                  key: password
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: conversation-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: conversation-postgres
+spec:
+  selector:
+    app: conversation-postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conversation-service
+  labels:
+    app: conversation-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: conversation-service
+  template:
+    metadata:
+      labels:
+        app: conversation-service
+    spec:
+      containers:
+        - name: conversation-service
+          image: conversation-service:phase1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8083
+          env:
+            - name: DB_HOST
+              value: conversation-postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: conversation_db
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: conversation-postgres-secret
+                  key: username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: conversation-postgres-secret
+                  key: password
+          readinessProbe:
+            tcpSocket:
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8083
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: conversation-service
+spec:
+  selector:
+    app: conversation-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8083

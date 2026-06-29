@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: gateway
-        image: gateway-service:latest
+        image: gateway-service:conversation-phase1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080

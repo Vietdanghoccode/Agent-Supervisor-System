@@ -1,0 +1,1057 @@
+# Đặc tả kiến trúc Conversation Assignment System
+
+## 1. Mục tiêu
+
+Hệ thống cần xử lý luồng:
+
+```text
+Customer bắt đầu conversation
+→ lưu conversation và message đầu tiên
+→ phân phối cho agent phù hợp
+→ nếu không có agent rảnh thì đưa vào hàng đợi
+→ khi agent rảnh thì tự động assign conversation tiếp theo
+```
+
+Ràng buộc quan trọng:
+
+```text
+Thời gian assign conversation cho agent < 2 giây
+Hệ thống phải mở rộng tốt
+Không assign vượt quá số concurrent conversation tối đa của agent
+Không mất conversation khi không có agent rảnh
+Có log/audit/reporting đầy đủ
+```
+
+---
+
+# 2. Thành phần chính
+
+## 2.1 Conversation Service
+
+Chịu trách nhiệm quản lý dữ liệu nghiệp vụ của hội thoại.
+
+Quản lý:
+
+```text
+conversation
+message
+conversation status
+agent_id được assign
+customer_id
+channel
+attachment metadata
+```
+
+Conversation Service là owner của database chính cho conversation.
+
+Không tự quyết định agent nào phù hợp.
+
+---
+
+## 2.2 Routing Service
+
+Chịu trách nhiệm điều phối assignment.
+
+Quản lý logic:
+
+```text
+chọn agent phù hợp
+routing theo skill/team/channel
+round-robin
+least active agent
+priority
+SLA
+VIP customer
+fallback queue
+```
+
+Routing Service không lưu conversation chính thức vào DB.
+
+Nó nhận event/request từ Conversation Service, sau đó gọi Agent Service để reserve agent hoặc đưa conversation vào queue.
+
+---
+
+## 2.3 Agent Service
+
+Chịu trách nhiệm quản lý trạng thái agent.
+
+Quản lý:
+
+```text
+agent online/offline/break
+agent available/busy
+current concurrent conversations
+max concurrent conversations
+agent skill/team
+agent capacity
+```
+
+Agent Service sử dụng Redis để lưu trạng thái nóng.
+
+---
+
+## 2.4 Redis
+
+Redis dùng cho dữ liệu realtime, thay đổi liên tục.
+
+Dùng để lưu:
+
+```text
+agent state
+agent concurrent counter
+available agent pool
+waiting queue
+assignment reservation
+distributed lock / atomic script
+```
+
+Redis không phải nơi lưu lịch sử chính thức.
+
+---
+
+## 2.5 Kafka
+
+Kafka dùng để truyền event bất đồng bộ.
+
+Dùng cho:
+
+```text
+ConversationCreated
+ConversationQueued
+ConversationAssigned
+AgentReserved
+AgentReleased
+AgentStatusChanged
+MessageCreated
+ConversationClosed
+```
+
+Kafka giúp các service khác như Notification, Supervisor Dashboard, Reporting, Analytics nhận event mà không làm chậm luồng chính.
+
+---
+
+## 2.6 Postgres
+
+Postgres dùng cho dữ liệu bền vững.
+
+Lưu:
+
+```text
+conversations
+messages
+agent assignment history
+status history
+audit logs
+reporting data
+```
+
+Postgres không nên là nguồn đọc realtime cho routing.
+
+---
+
+# 3. Kiến trúc tổng thể
+
+```text
+Customer
+   ↓
+API Gateway
+   ↓
+Conversation Service
+   ↓
+Postgres: create conversation + first message
+   ↓
+Kafka: publish ConversationCreated
+   ↓
+Routing Service
+   ↓
+Agent Service
+   ↓
+Redis: reserve agent hoặc enqueue conversation
+   ↓
+Conversation Service
+   ↓
+Postgres: update ASSIGNED hoặc giữ WAITING
+   ↓
+Kafka: publish ConversationAssigned / ConversationQueued
+```
+
+---
+
+# 4. Luồng 1: Có agent available
+
+## Bước 1: Customer gửi message đầu tiên
+
+```text
+POST /conversations
+{
+  "customer_id": "C001",
+  "message": "example",
+  "channel": "webchat",
+  "skill": "support"
+}
+```
+
+## Bước 2: Conversation Service tạo conversation
+
+Conversation Service ghi DB trong transaction local:
+
+```text
+BEGIN
+
+INSERT INTO conversations:
+  id = CONV001
+  customer_id = C001
+  status = WAITING
+  agent_id = null
+  channel = webchat
+  skill = support
+
+INSERT INTO messages:
+  conversation_id = CONV001
+  sender_type = CUSTOMER
+  content = "example"
+
+INSERT INTO outbox_events:
+  event_type = ConversationCreated
+  payload = { conversation_id: CONV001, skill: support }
+
+COMMIT
+```
+
+Ở đây dùng **Transactional Outbox Pattern**.
+
+Không publish Kafka trực tiếp trong transaction DB.
+
+---
+
+## Bước 3: Outbox Publisher đẩy event vào Kafka
+
+```text
+Kafka topic: conversation.events
+
+Event:
+{
+  "event_type": "ConversationCreated",
+  "conversation_id": "CONV001",
+  "skill": "support",
+  "customer_id": "C001",
+  "created_at": "..."
+}
+```
+
+---
+
+## Bước 4: Routing Service consume event
+
+Routing Service nhận `ConversationCreated`.
+
+Sau đó gọi:
+
+```text
+Agent Service.reserveBestAgent(conversation_id, skill)
+```
+
+---
+
+## Bước 5: Agent Service reserve agent trong Redis
+
+Agent Service chạy Redis Lua Script để đảm bảo atomic.
+
+Logic:
+
+```text
+1. Lấy agent phù hợp từ available pool
+2. Kiểm tra current_conversation < max_conversation
+3. Tăng current_conversation +1
+4. Tạo reservation với TTL
+5. Nếu agent full thì remove khỏi available pool
+6. Trả về agent_id
+```
+
+Ví dụ Redis key:
+
+```text
+agent:{agent_id}:state = AVAILABLE
+agent:{agent_id}:current_conversations = 3
+agent:{agent_id}:max_conversations = 10
+
+available_agents:{skill} = ZSET(agent_id, score)
+reservation:{conversation_id} = agent_id, TTL 30s
+```
+
+Nếu thành công:
+
+```text
+{
+  "status": "RESERVED",
+  "agent_id": "A001"
+}
+```
+
+---
+
+## Bước 6: Routing Service yêu cầu Conversation Service confirm assignment
+
+```text
+PATCH /conversations/CONV001/assign
+{
+  "agent_id": "A001",
+  "reservation_id": "RESV001"
+}
+```
+
+Conversation Service update DB:
+
+```text
+BEGIN
+
+UPDATE conversations
+SET status = ASSIGNED,
+    agent_id = A001,
+    assigned_at = now()
+WHERE id = CONV001
+  AND status = WAITING;
+
+INSERT INTO conversation_assignment_history:
+  conversation_id = CONV001
+  agent_id = A001
+  action = ASSIGNED
+
+INSERT INTO outbox_events:
+  event_type = ConversationAssigned
+  payload = { conversation_id: CONV001, agent_id: A001 }
+
+COMMIT
+```
+
+Điều kiện `WHERE status = WAITING` giúp idempotent, tránh assign trùng.
+
+---
+
+## Bước 7: Routing Service confirm reservation
+
+Sau khi Conversation Service update thành công:
+
+```text
+Agent Service.confirmReservation(conversation_id)
+```
+
+Agent Service xóa:
+
+```text
+reservation:{conversation_id}
+```
+
+Assignment hoàn tất.
+
+---
+
+# 5. Luồng 2: Không có agent available
+
+## Bước 1 đến bước 4 giống như trên
+
+Conversation đã được tạo:
+
+```text
+conversation_id = CONV002
+status = WAITING
+agent_id = null
+```
+
+Routing Service gọi:
+
+```text
+Agent Service.reserveBestAgent(CONV002, skill)
+```
+
+Agent Service trả:
+
+```text
+{
+  "status": "NO_AGENT_AVAILABLE"
+}
+```
+
+---
+
+## Bước 5: Routing Service đưa conversation vào Redis queue
+
+Queue nên nằm ở Routing Service, vì queue là một phần của routing.
+
+Redis queue dùng ZSET:
+
+```text
+waiting_queue:{skill}
+```
+
+Ví dụ:
+
+```text
+ZADD waiting_queue:support 1710000000 CONV002
+```
+
+Score có thể là:
+
+```text
+created_at timestamp
+priority score
+SLA score
+VIP score
+```
+
+Ví dụ nếu có priority:
+
+```text
+score = created_at - priority_weight
+```
+
+Conversation nào score thấp hơn được lấy trước.
+
+---
+
+## Bước 6: Routing Service báo Conversation Service cập nhật queued metadata
+
+```text
+PATCH /conversations/CONV002/queue
+{
+  "queue_name": "waiting_queue:support",
+  "queue_position": 5
+}
+```
+
+Conversation Service giữ:
+
+```text
+status = WAITING
+agent_id = null
+```
+
+Có thể cập nhật thêm:
+
+```text
+queued_at
+queue_name
+estimated_wait_time
+```
+
+Sau đó publish event:
+
+```text
+ConversationQueued
+```
+
+---
+
+## Bước 7: Client nhận thông báo
+
+User thấy:
+
+```text
+Hiện tất cả tư vấn viên đang bận. Vui lòng chờ trong giây lát.
+```
+
+Thông báo này có thể gửi qua WebSocket từ Notification Service sau khi consume Kafka event `ConversationQueued`.
+
+---
+
+# 6. Luồng 3: Agent rảnh và lấy conversation từ queue
+
+## Bước 1: Agent đóng conversation
+
+Conversation Service xử lý:
+
+```text
+PATCH /conversations/CONV001/close
+```
+
+DB update:
+
+```text
+status = CLOSED
+closed_at = now()
+```
+
+Publish event:
+
+```text
+ConversationClosed
+```
+
+---
+
+## Bước 2: Agent Service giảm concurrent count
+
+Routing Service hoặc Agent Service consume `ConversationClosed`.
+
+Agent Service chạy:
+
+```text
+DECR agent:A001:current_conversations
+```
+
+Nếu agent vẫn online và current < max:
+
+```text
+ZADD available_agents:support score A001
+```
+
+Publish event:
+
+```text
+AgentAvailable
+```
+
+---
+
+## Bước 3: Routing Service consume AgentAvailable
+
+Routing Service kiểm tra queue:
+
+```text
+ZRANGE waiting_queue:support 0 0
+```
+
+Nếu có conversation chờ:
+
+```text
+CONV002
+```
+
+Routing Service remove atomic:
+
+```text
+ZPOPMIN waiting_queue:support
+```
+
+Sau đó gọi:
+
+```text
+Agent Service.reserveSpecificAgent(CONV002, A001)
+```
+
+Nếu reserve thành công:
+
+```text
+Conversation Service assign CONV002 cho A001
+```
+
+Nếu assign DB thành công:
+
+```text
+Agent Service.confirmReservation(CONV002)
+Kafka: ConversationAssigned
+```
+
+---
+
+# 7. Redis dùng ở đâu?
+
+Redis nằm chủ yếu trong Agent Service và Routing Service.
+
+## Agent Service Redis keys
+
+```text
+agent:{agent_id}:state
+agent:{agent_id}:current_conversations
+agent:{agent_id}:max_conversations
+agent:{agent_id}:skills
+
+available_agents:{skill}
+reservation:{conversation_id}
+```
+
+## Routing Service Redis keys
+
+```text
+waiting_queue:{skill}
+waiting_queue:{team}
+routing_lock:{conversation_id}
+```
+
+Có thể đặt queue trong Routing Service vì queue là logic phân phối.
+
+Không nên để Conversation Service tự quản queue Redis, vì Conversation Service chỉ nên quản vòng đời conversation trong DB.
+
+---
+
+# 8. Kafka dùng ở đâu?
+
+Kafka dùng giữa các service để bất đồng bộ hóa event.
+
+## Topics đề xuất
+
+```text
+conversation.events
+agent.events
+routing.events
+message.events
+notification.events
+```
+
+## Event chính
+
+```text
+ConversationCreated
+ConversationQueued
+ConversationAssigned
+ConversationClosed
+AgentStatusChanged
+AgentAvailable
+AgentReserved
+MessageCreated
+```
+
+## Consumer chính
+
+```text
+Routing Service:
+  consume ConversationCreated, AgentAvailable, ConversationClosed
+
+Agent Service:
+  consume AgentStatusChanged nếu cần
+
+Notification Service:
+  consume ConversationQueued, ConversationAssigned, MessageCreated
+
+Supervisor Service:
+  consume AgentStatusChanged, ConversationAssigned
+
+Reporting Service:
+  consume toàn bộ event để ghi báo cáo
+```
+
+---
+
+# 9. Transaction nằm ở đâu?
+
+Không có distributed transaction 2-phase commit giữa Conversation Service, Agent Service, Redis và Kafka.
+
+Thay vào đó dùng:
+
+```text
+Local Transaction
+Transactional Outbox
+Saga Pattern
+Compensating Action
+Idempotency
+Reservation TTL
+```
+
+## 9.1 Local transaction
+
+Conversation Service chỉ transaction với DB của nó:
+
+```text
+create conversation
+create message
+create outbox event
+```
+
+Agent Service chỉ atomic với Redis.
+
+---
+
+## 9.2 Transactional Outbox
+
+Khi Conversation Service ghi DB, nó đồng thời ghi event vào bảng outbox.
+
+Sau đó Outbox Worker publish Kafka.
+
+Mục tiêu:
+
+```text
+Không có chuyện DB commit rồi nhưng Kafka event bị mất.
+```
+
+---
+
+## 9.3 Saga cho assignment
+
+Saga assignment:
+
+```text
+1. ConversationCreated
+2. Routing reserve agent
+3. Conversation Service confirm assignment
+4. Agent Service confirm reservation
+```
+
+Nếu lỗi:
+
+```text
+Reserve agent thành công
+nhưng update conversation thất bại
+```
+
+thì Routing gọi:
+
+```text
+Agent Service.releaseReservation(conversation_id)
+```
+
+Nếu Routing chết trước khi release, Redis TTL tự hết hạn và release agent.
+
+---
+
+# 10. Rollback / Compensation
+
+## Case 1: Conversation tạo thất bại
+
+Không publish event.
+
+Không gọi Routing.
+
+Không có queue.
+
+---
+
+## Case 2: Kafka publish thất bại
+
+Outbox event vẫn nằm trong DB.
+
+Outbox Worker retry.
+
+---
+
+## Case 3: Agent reserve thành công nhưng Conversation update thất bại
+
+Compensation:
+
+```text
+Agent Service.releaseReservation(conversation_id)
+DECR current_conversations
+add agent back to available pool nếu còn capacity
+```
+
+---
+
+## Case 4: Conversation đã queued nhưng Redis queue mất dữ liệu
+
+Có Reconciliation Worker định kỳ:
+
+```text
+SELECT id FROM conversations
+WHERE status = WAITING
+  AND agent_id IS NULL
+  AND created_at > now() - interval '24 hours'
+```
+
+Sau đó kiểm tra Redis queue.
+
+Nếu conversation chưa có trong queue:
+
+```text
+re-enqueue conversation_id
+```
+
+---
+
+## Case 5: Conversation được assign trong DB nhưng Redis agent counter sai
+
+Có Reconciliation Worker:
+
+```text
+SELECT agent_id, COUNT(*)
+FROM conversations
+WHERE status IN ('ASSIGNED', 'ACTIVE')
+GROUP BY agent_id
+```
+
+Sau đó sync lại:
+
+```text
+agent:{agent_id}:current_conversations
+```
+
+---
+
+# 11. Idempotency
+
+Mọi API/event cần idempotent.
+
+## Conversation Service
+
+```text
+POST /conversations
+Idempotency-Key: customer_id + channel + initial_message_id
+```
+
+Tránh tạo trùng conversation nếu client retry.
+
+## Assignment
+
+```text
+UPDATE conversations
+SET agent_id = A001, status = ASSIGNED
+WHERE id = CONV001
+  AND status = WAITING
+  AND agent_id IS NULL
+```
+
+Nếu đã assigned rồi thì không assign lại.
+
+## Queue
+
+Redis queue dùng ZSET:
+
+```text
+ZADD waiting_queue:support NX score CONV001
+```
+
+`NX` giúp không enqueue trùng.
+
+---
+
+# 12. Schema DB đề xuất
+
+## conversations
+
+```text
+id
+customer_id
+agent_id nullable
+status
+channel
+skill
+priority
+created_at
+queued_at
+assigned_at
+closed_at
+```
+
+## messages
+
+```text
+id
+conversation_id
+sender_type
+sender_id
+content
+message_type
+created_at
+```
+
+## conversation_assignment_history
+
+```text
+id
+conversation_id
+agent_id
+action
+created_at
+metadata
+```
+
+## outbox_events
+
+```text
+id
+aggregate_type
+aggregate_id
+event_type
+payload
+status
+retry_count
+created_at
+published_at
+```
+
+---
+
+# 13. Công nghệ lưu đoạn chat
+
+## Text message
+
+Lưu trong Postgres:
+
+```text
+messages.content
+```
+
+Postgres đủ tốt cho phần lớn hệ thống chat transactional.
+
+## File / ảnh / video
+
+Không lưu binary trực tiếp trong Postgres.
+
+Dùng:
+
+```text
+S3 / MinIO / Google Cloud Storage
+```
+
+Postgres chỉ lưu metadata:
+
+```text
+file_url
+file_name
+file_size
+mime_type
+message_id
+```
+
+## Search message
+
+Nếu cần search full-text mạnh:
+
+```text
+OpenSearch / Elasticsearch
+```
+
+Luồng:
+
+```text
+MessageCreated event
+→ Search Indexer consume Kafka
+→ index message vào OpenSearch
+```
+
+Postgres vẫn là source of truth.
+
+---
+
+# 14. Luồng tổng hợp cuối cùng
+
+```text
+Customer gửi message đầu tiên
+        ↓
+Conversation Service
+        ↓
+Postgres transaction:
+  create conversation WAITING
+  create first message
+  create outbox event
+        ↓
+Outbox Publisher
+        ↓
+Kafka: ConversationCreated
+        ↓
+Routing Service
+        ↓
+Agent Service
+        ↓
+Redis atomic reserve agent
+        ↓
+ ┌─────────────────────────────┐
+ │ Có agent                     │
+ │ - reserve agent              │
+ │ - update conversation         │
+ │ - confirm reservation         │
+ │ - publish ConversationAssigned│
+ └─────────────────────────────┘
+
+ hoặc
+
+ ┌─────────────────────────────┐
+ │ Không có agent               │
+ │ - push conversation_id queue  │
+ │ - keep status WAITING         │
+ │ - publish ConversationQueued  │
+ └─────────────────────────────┘
+```
+
+---
+
+# 15. Khi nào nên scale từng phần?
+
+## Scale Conversation Service
+
+Khi:
+
+```text
+nhiều message
+nhiều conversation create/update
+DB write load cao
+```
+
+Scale bằng:
+
+```text
+horizontal service instances
+Postgres read replica
+partition messages by created_at/conversation_id
+```
+
+## Scale Routing Service
+
+Khi:
+
+```text
+nhiều event ConversationCreated
+nhiều queue
+logic routing phức tạp
+```
+
+Scale bằng:
+
+```text
+Kafka consumer group
+Redis atomic lock theo conversation_id
+partition queue theo skill/team
+```
+
+## Scale Agent Service
+
+Khi:
+
+```text
+nhiều agent state update
+nhiều reserve/release
+```
+
+Scale bằng:
+
+```text
+stateless instances
+Redis Cluster
+Lua script atomic
+```
+
+## Scale Redis
+
+Dùng:
+
+```text
+Redis Sentinel hoặc Redis Cluster
+replica
+AOF persistence
+monitor memory
+```
+
+---
+
+# 16. Kết luận kiến trúc
+
+Kiến trúc nên chọn:
+
+```text
+Conversation Service:
+  quản lý conversation/message bền vững
+
+Routing Service:
+  quyết định assign/queue
+
+Agent Service:
+  quản lý trạng thái và capacity agent
+
+Redis:
+  realtime state + queue + counter + reservation
+
+Kafka:
+  event bus cho async workflow
+
+Postgres:
+  source of truth cho conversation/message/history
+```
+
+Đây là kiến trúc cân bằng giữa:
+
+```text
+tốc độ realtime
+khả năng mở rộng
+không mất dữ liệu
+không assign trùng
+dễ audit
+dễ tách service về sau
+```

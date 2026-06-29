@@ -22,6 +22,12 @@ spring:
                 - Path=/api/auth/v3/api-docs
               filters:
                 - RewritePath=/api/auth/v3/api-docs, /v3/api-docs
+            - id: conversation-service-api-docs-route
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:80}
+              predicates:
+                - Path=/api/conversation/v3/api-docs
+              filters:
+                - RewritePath=/api/conversation/v3/api-docs, /v3/api-docs
             # --- General service routes ---
             - id: user-service-route
               uri: ${USER_SERVICE_URL:http://user-service:80}
@@ -31,6 +37,10 @@ spring:
               uri: ${AUTH_SERVICE_URL:http://auth-service:8081}
               predicates:
                 - Path=/api/auth/**
+            - id: conversation-service-route
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:80}
+              predicates:
+                - Path=/conversations/**
 
 springdoc:
   api-docs:
@@ -44,3 +54,5 @@ springdoc:
         url: /api/user/v3/api-docs
       - name: auth-service
         url: /api/auth/v3/api-docs
+      - name: conversation-service
+        url: /api/conversation/v3/api-docs
