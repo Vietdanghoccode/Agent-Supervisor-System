@@ -16,10 +16,13 @@ spec:
     spec:
       containers:
       - name: gateway
-        image: gateway-service:conversation-phase1
+        image: gateway-service:phase3-agent
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
+        env:
+        - name: AGENT_SERVICE_URL
+          value: http://agent-service:80
 
 ---
 apiVersion: v1

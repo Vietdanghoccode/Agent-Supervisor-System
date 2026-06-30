@@ -21,7 +21,7 @@ public class SecurityConfig {
                     "/v3/api-docs/**",
                     "/webjars/**"
                 ).permitAll()
-                .pathMatchers("/api/**", "/conversations/**").permitAll()
+                .pathMatchers("/api/**", "/conversations/**", "/agents/**", "/reservations/**").permitAll()
                 .anyExchange().authenticated()
             );
 

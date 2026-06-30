@@ -1,0 +1,36 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  application:
+    name: agent-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2s}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  openapi:
+    server-url: ${OPENAPI_SERVER_URL:http://localhost:8080}
+  reservation:
+    ttl: ${RESERVATION_TTL:30s}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,redis
+        liveness:
+          include: livenessState
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

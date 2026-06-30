@@ -78,11 +78,11 @@ Chịu trách nhiệm quản lý trạng thái agent.
 Quản lý:
 
 ```text
-agent online/offline/break
-agent available/busy
+connectivity online/offline
+availability status available/waiting_to_break/break
 current concurrent conversations
 max concurrent conversations
-agent skill/team
+agent skill/team/channel
 agent capacity
 ```
 
@@ -248,7 +248,7 @@ Routing Service nhận `ConversationCreated`.
 Sau đó gọi:
 
 ```text
-Agent Service.reserveBestAgent(conversation_id, skill)
+POST /agents/reserve { conversationId, skill }
 ```
 
 ---
@@ -260,23 +260,26 @@ Agent Service chạy Redis Lua Script để đảm bảo atomic.
 Logic:
 
 ```text
-1. Lấy agent phù hợp từ available pool
-2. Kiểm tra current_conversation < max_conversation
-3. Tăng current_conversation +1
-4. Tạo reservation với TTL
-5. Nếu agent full thì remove khỏi available pool
-6. Trả về agent_id
+1. Trả lại cùng agent nếu conversation đã reserve/confirm
+2. Lấy ngẫu nhiên ứng viên từ available pool
+3. Gate: state=online, status=available và current < max
+4. Sau khi qua gate mới tăng current +1
+5. Nếu agent full, remove khỏi pool của tất cả skill
+6. Tạo reservation + owner metadata với TTL và trả agent_id
 ```
 
 Ví dụ Redis key:
 
 ```text
-agent:{agent_id}:state = AVAILABLE
+agent:{agent_id}:state = online
+agent:{agent_id}:status = available
 agent:{agent_id}:current_conversations = 3
 agent:{agent_id}:max_conversations = 10
 
-available_agents:{skill} = ZSET(agent_id, score)
+available_agents:{skill} = SET(agent_id)
 reservation:{conversation_id} = agent_id, TTL 30s
+reservation_owner:{conversation_id} = agent_id
+assignment:{conversation_id} = agent_id sau confirm
 ```
 
 Nếu thành công:
@@ -333,13 +336,15 @@ COMMIT
 Sau khi Conversation Service update thành công:
 
 ```text
-Agent Service.confirmReservation(conversation_id)
+POST /reservations/{conversation_id}/confirm
 ```
 
-Agent Service xóa:
+Agent Service atomically tạo assignment marker rồi xóa reservation tạm:
 
 ```text
+assignment:{conversation_id} = agent_id
 reservation:{conversation_id}
+reservation_owner:{conversation_id}
 ```
 
 Assignment hoàn tất.
@@ -486,13 +491,15 @@ Routing Service hoặc Agent Service consume `ConversationClosed`.
 Agent Service chạy:
 
 ```text
-DECR agent:A001:current_conversations
+POST /agents/A001/release { conversationId }
 ```
 
-Nếu agent vẫn online và current < max:
+Lua giảm counter đúng một lần. Nếu status là `waiting_to_break` và current về 0,
+status tự chuyển thành `break`. Chỉ khi agent online, status available và
+current < max mới add lại tất cả skill pool:
 
 ```text
-ZADD available_agents:support score A001
+SADD available_agents:support A001
 ```
 
 Publish event:
@@ -523,10 +530,10 @@ Routing Service remove atomic:
 ZPOPMIN waiting_queue:support
 ```
 
-Sau đó gọi:
+Sau đó gọi lại pool reserve của Phase 3:
 
 ```text
-Agent Service.reserveSpecificAgent(CONV002, A001)
+POST /agents/reserve { conversationId: CONV002, skill: support }
 ```
 
 Nếu reserve thành công:
@@ -538,7 +545,7 @@ Conversation Service assign CONV002 cho A001
 Nếu assign DB thành công:
 
 ```text
-Agent Service.confirmReservation(CONV002)
+POST /reservations/CONV002/confirm
 Kafka: ConversationAssigned
 ```
 
@@ -552,12 +559,17 @@ Redis nằm chủ yếu trong Agent Service và Routing Service.
 
 ```text
 agent:{agent_id}:state
+agent:{agent_id}:status
 agent:{agent_id}:current_conversations
 agent:{agent_id}:max_conversations
 agent:{agent_id}:skills
+agent:{agent_id}:teams
+agent:{agent_id}:channels
 
 available_agents:{skill}
 reservation:{conversation_id}
+reservation_owner:{conversation_id}
+assignment:{conversation_id}
 ```
 
 ## Routing Service Redis keys
@@ -686,10 +698,13 @@ nhưng update conversation thất bại
 thì Routing gọi:
 
 ```text
-Agent Service.releaseReservation(conversation_id)
+POST /agents/{agent_id}/release { conversationId }
 ```
 
-Nếu Routing chết trước khi release, Redis TTL tự hết hạn và release agent.
+Nếu Routing chết trước khi release, reservation hết TTL. Redis expired-event
+listener gọi cùng release Lua để giảm counter và phục hồi pool. Keyspace event là
+Pub/Sub không replay; Phase 3 chấp nhận khả năng mất recovery event nếu Agent
+Service ngừng đúng lúc TTL hết hạn.
 
 ---
 
@@ -718,9 +733,9 @@ Outbox Worker retry.
 Compensation:
 
 ```text
-Agent Service.releaseReservation(conversation_id)
-DECR current_conversations
-add agent back to available pool nếu còn capacity
+POST /agents/{agent_id}/release { conversationId }
+Lua xác minh owner, giảm current đúng một lần
+add agent vào tất cả skill pool nếu online/available và còn capacity
 ```
 
 ---
