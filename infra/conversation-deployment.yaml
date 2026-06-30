@@ -101,7 +101,7 @@ spec:
     spec:
       containers:
         - name: conversation-service
-          image: conversation-service:phase1
+          image: conversation-service:phase1-openapi
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8083
@@ -122,6 +122,8 @@ spec:
                 secretKeyRef:
                   name: conversation-postgres-secret
                   key: password
+            - name: OPENAPI_SERVER_URL
+              value: http://localhost:8080
           readinessProbe:
             tcpSocket:
               port: 8083

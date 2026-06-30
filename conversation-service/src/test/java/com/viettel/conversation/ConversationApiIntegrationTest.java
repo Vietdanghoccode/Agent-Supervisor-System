@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -120,6 +121,13 @@ class ConversationApiIntegrationTest extends PostgresIntegrationTest {
                 .andExpect(header().string("Content-Type", "application/problem+json"))
                 .andExpect(jsonPath("$.detail").value("Request body is missing or malformed"));
         assertThat(count("conversations")).isZero();
+    }
+
+    @Test
+    void publishesLocalGatewayAsOpenApiServer() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.servers[0].url").value("http://localhost:8080"));
     }
 
     @Test

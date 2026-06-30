@@ -22,3 +22,7 @@ spring:
 springdoc:
   api-docs:
     path: /v3/api-docs
+
+app:
+  openapi:
+    server-url: ${OPENAPI_SERVER_URL:http://localhost:8080}
