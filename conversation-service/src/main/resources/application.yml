@@ -18,6 +18,15 @@ spring:
         format_sql: ${HIBERNATE_FORMAT_SQL:false}
   flyway:
     enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: ${KAFKA_MAX_BLOCK_MS:5000}
+        delivery.timeout.ms: ${KAFKA_DELIVERY_TIMEOUT_MS:30000}
+        request.timeout.ms: ${KAFKA_REQUEST_TIMEOUT_MS:10000}
 
 springdoc:
   api-docs:
@@ -26,3 +35,20 @@ springdoc:
 app:
   openapi:
     server-url: ${OPENAPI_SERVER_URL:http://localhost:8080}
+  outbox:
+    publisher:
+      enabled: ${OUTBOX_PUBLISHER_ENABLED:false}
+      topic: ${OUTBOX_TOPIC:conversation.events}
+      supported-event-types: ${OUTBOX_SUPPORTED_EVENT_TYPES:ConversationCreated}
+      poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
+      metrics-interval: ${OUTBOX_METRICS_INTERVAL:10s}
+      batch-size: ${OUTBOX_BATCH_SIZE:100}
+      lease-duration: ${OUTBOX_LEASE_DURATION:60s}
+      retry-initial-delay: ${OUTBOX_RETRY_INITIAL_DELAY:1s}
+      retry-max-delay: ${OUTBOX_RETRY_MAX_DELAY:60s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

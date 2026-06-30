@@ -41,6 +41,21 @@ public class OutboxEvent {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
+
+    @Column(name = "next_attempt_at", nullable = false)
+    private Instant nextAttemptAt;
+
+    @Column(name = "locked_by", length = 255)
+    private String lockedBy;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    @Column(name = "last_error")
+    private String lastError;
+
     protected OutboxEvent() {
     }
 
@@ -53,5 +68,10 @@ public class OutboxEvent {
         this.status = OutboxStatus.PENDING;
         this.createdAt = createdAt;
         this.publishedAt = null;
+        this.attemptCount = 0;
+        this.nextAttemptAt = createdAt;
+        this.lockedBy = null;
+        this.lockedUntil = null;
+        this.lastError = null;
     }
 }

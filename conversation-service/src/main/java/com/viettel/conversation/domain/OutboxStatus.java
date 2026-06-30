@@ -1,5 +1,7 @@
 package com.viettel.conversation.domain;
 
 public enum OutboxStatus {
-    PENDING
+    PENDING,
+    PROCESSING,
+    PUBLISHED
 }

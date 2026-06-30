@@ -101,7 +101,7 @@ spec:
     spec:
       containers:
         - name: conversation-service
-          image: conversation-service:phase1-openapi
+          image: conversation-service:phase2-outbox
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8083
@@ -146,3 +146,58 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 8083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conversation-outbox-publisher
+  labels:
+    app: conversation-outbox-publisher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: conversation-outbox-publisher
+  template:
+    metadata:
+      labels:
+        app: conversation-outbox-publisher
+    spec:
+      containers:
+        - name: outbox-publisher
+          image: conversation-service:phase2-outbox
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+          env:
+            - name: DB_HOST
+              value: conversation-postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: conversation_db
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: conversation-postgres-secret
+                  key: username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: conversation-postgres-secret
+                  key: password
+            - name: OUTBOX_PUBLISHER_ENABLED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
