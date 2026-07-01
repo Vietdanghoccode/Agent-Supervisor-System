@@ -4,7 +4,7 @@ import java.util.UUID;
 
 public record ReservationResponse(
         UUID conversationId,
-        long agentId,
+        Long agentId,
         String status,
         long reservationTtlSeconds) {
 }

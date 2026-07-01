@@ -19,6 +19,9 @@ app:
     server-url: ${OPENAPI_SERVER_URL:http://localhost:8080}
   reservation:
     ttl: ${RESERVATION_TTL:30s}
+    reconciliation-interval: ${RESERVATION_RECONCILIATION_INTERVAL:1s}
+  waiting-queue:
+    retention: ${WAITING_REQUEST_RETENTION:24h}
 
 management:
   endpoint:

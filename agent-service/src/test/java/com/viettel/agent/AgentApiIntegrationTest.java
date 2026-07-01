@@ -12,6 +12,8 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,14 +73,28 @@ class AgentApiIntegrationTest extends RedisIntegrationTest {
     }
 
     @Test
-    void returnsConflictWhenNoAgentIsAvailable() throws Exception {
+    void queuesPollsAndCancelsWhenNoAgentIsAvailable() throws Exception {
+        UUID conversationId = UUID.randomUUID();
         mockMvc.perform(post("/agents/reserve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"conversationId":"%s","skill":"support"}
-                                """.formatted(UUID.randomUUID())))
-                .andExpect(status().isConflict())
-                .andExpect(header().string("Content-Type", "application/problem+json"));
+                                """.formatted(conversationId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.conversationId").value(conversationId.toString()))
+                .andExpect(jsonPath("$.status").value("WAITING"))
+                .andExpect(jsonPath("$.agentId").doesNotExist());
+
+        mockMvc.perform(get("/reservations/" + conversationId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("WAITING"));
+
+        mockMvc.perform(delete("/reservations/" + conversationId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        mockMvc.perform(delete("/reservations/" + conversationId))
+                .andExpect(status().isOk());
 
         mockMvc.perform(post("/reservations/not-a-uuid/confirm"))
                 .andExpect(status().isBadRequest())

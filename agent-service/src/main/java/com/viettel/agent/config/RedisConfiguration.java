@@ -9,7 +9,7 @@ import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
 @Configuration
-@EnableConfigurationProperties(ReservationProperties.class)
+@EnableConfigurationProperties({ReservationProperties.class, WaitingQueueProperties.class})
 public class RedisConfiguration {
     @Bean
     RedisMessageListenerContainer redisMessageListenerContainer(

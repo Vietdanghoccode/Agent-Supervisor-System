@@ -1,28 +1,30 @@
 local requested_agent = ARGV[1]
 local conversation_id = ARGV[2]
+local retention = tonumber(ARGV[3])
 local prefix = 'agent:' .. requested_agent .. ':'
 if redis.call('EXISTS', prefix .. 'max_conversations') == 0 then
     return {'PROFILE_NOT_FOUND'}
 end
 
-local reservation_key = 'reservation:' .. conversation_id
-local owner_key = 'reservation_owner:' .. conversation_id
-local assignment_key = 'assignment:' .. conversation_id
-local owner = redis.call('GET', reservation_key)
-if not owner then
-    owner = redis.call('GET', assignment_key)
-end
-if not owner then
-    owner = redis.call('GET', owner_key)
-end
-if not owner then
+local request_key = 'request:' .. conversation_id
+local request_status = redis.call('HGET', request_key, 'status')
+if not request_status or request_status == 'RELEASED' or request_status == 'CANCELLED'
+    or request_status == 'EXPIRED' then
     return {'ALREADY_RELEASED'}
 end
+local owner = redis.call('HGET', request_key, 'agent_id')
+if not owner then return {'ALREADY_RELEASED'} end
 if owner ~= requested_agent then
     return {'OWNER_MISMATCH', owner}
 end
 
-redis.call('DEL', reservation_key, owner_key, assignment_key)
+redis.call('DEL', 'reservation:' .. conversation_id)
+redis.call('ZREM', 'reservation_expiry_index', conversation_id)
+for _, skill in ipairs(redis.call('SMEMBERS', prefix .. 'skills')) do
+    redis.call('SREM', 'available_agents:' .. skill, requested_agent)
+end
+redis.call('HSET', request_key, 'status', 'RELEASED', 'agent_id', requested_agent)
+redis.call('EXPIRE', request_key, retention)
 local current = tonumber(redis.call('GET', prefix .. 'current_conversations') or '0')
 if current > 0 then
     current = redis.call('DECR', prefix .. 'current_conversations')
@@ -39,11 +41,4 @@ end
 
 local state = redis.call('GET', prefix .. 'state')
 local max = tonumber(redis.call('GET', prefix .. 'max_conversations'))
-if state == 'online' and status == 'available' and current < max then
-    local skills = redis.call('SMEMBERS', prefix .. 'skills')
-    for _, skill in ipairs(skills) do
-        redis.call('SADD', 'available_agents:' .. skill, requested_agent)
-    end
-end
-
 return {'RELEASED', tostring(current), status}

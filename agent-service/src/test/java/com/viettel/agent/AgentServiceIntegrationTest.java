@@ -4,7 +4,9 @@ import com.viettel.agent.api.AgentProfileRequest;
 import com.viettel.agent.api.AgentStateResponse;
 import com.viettel.agent.api.ReserveRequest;
 import com.viettel.agent.exception.AgentConflictException;
+import com.viettel.agent.exception.AgentNotFoundException;
 import com.viettel.agent.service.AgentService;
+import com.viettel.agent.service.ReservationExpiryReconciler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,7 @@ class AgentServiceIntegrationTest extends RedisIntegrationTest {
     @Autowired AgentService agentService;
     @Autowired StringRedisTemplate redis;
     @Autowired RedisConnectionFactory connectionFactory;
+    @Autowired ReservationExpiryReconciler expiryReconciler;
 
     @BeforeEach
     void cleanRedis() {
@@ -49,8 +52,8 @@ class AgentServiceIntegrationTest extends RedisIntegrationTest {
                     ready.countDown();
                     start.await();
                     try {
-                        agentService.reserve(new ReserveRequest(conversationId, "support"));
-                        return true;
+                        return "RESERVED".equals(agentService.reserve(
+                                new ReserveRequest(conversationId, "support")).status());
                     } catch (AgentConflictException ignored) {
                         return false;
                     }
@@ -63,6 +66,7 @@ class AgentServiceIntegrationTest extends RedisIntegrationTest {
                 if (future.get()) successes++;
             }
             assertThat(successes).isEqualTo(3);
+            assertThat(redis.opsForZSet().size("waiting_requests:support")).isEqualTo(9);
             assertThat(agentService.online(1).currentConversations()).isEqualTo(3);
         } finally {
             executor.shutdownNow();
@@ -90,8 +94,8 @@ class AgentServiceIntegrationTest extends RedisIntegrationTest {
     void stalePoolEntryCannotBypassStateGate() {
         agentService.updateProfile(3, profile(1, Set.of("support")));
         redis.opsForSet().add("available_agents:support", "3");
-        assertThatThrownBy(() -> agentService.reserve(new ReserveRequest(UUID.randomUUID(), "support")))
-                .isInstanceOf(AgentConflictException.class);
+        assertThat(agentService.reserve(new ReserveRequest(UUID.randomUUID(), "support")).status())
+                .isEqualTo("WAITING");
         assertThat(agentService.offline(3).currentConversations()).isZero();
     }
 
@@ -107,10 +111,48 @@ class AgentServiceIntegrationTest extends RedisIntegrationTest {
         agentService.confirm(conversationId);
         agentService.confirm(conversationId);
         assertThat(agentService.online(4).currentConversations()).isEqualTo(1);
+        assertThat(redis.hasKey("reservation:" + conversationId)).isFalse();
+        assertThat(redis.opsForZSet().score("reservation_expiry_index", conversationId.toString())).isNull();
+        assertThat(redis.getExpire("request:" + conversationId)).isEqualTo(-1);
 
         agentService.release(4, conversationId);
         agentService.release(4, conversationId);
         assertThat(agentService.online(4).currentConversations()).isZero();
+    }
+
+    @Test
+    void usesOnlySimplifiedReservationKeysAndRejectsWrongOwner() {
+        profileAndOnline(10, 1, Set.of("support"));
+        UUID conversationId = UUID.randomUUID();
+        agentService.reserve(new ReserveRequest(conversationId, "support"));
+
+        assertThat(redis.opsForHash().get("request:" + conversationId, "agent_id")).isEqualTo("10");
+        assertThat(redis.opsForZSet().score("reservation_expiry_index", conversationId.toString())).isNotNull();
+        assertThat(redis.keys("reservation_owner:*")).isEmpty();
+        assertThat(redis.keys("assignment:*")).isEmpty();
+        assertThatThrownBy(() -> agentService.release(11, conversationId))
+                .isInstanceOf(AgentNotFoundException.class);
+
+        profileAndOnline(11, 1, Set.of("support"));
+        assertThatThrownBy(() -> agentService.release(11, conversationId))
+                .isInstanceOf(AgentConflictException.class)
+                .hasMessageContaining("Conversation belongs to agent 10");
+        assertThat(agentService.online(10).currentConversations()).isEqualTo(1);
+    }
+
+    @Test
+    void reconciliationRecoversExpiryWhenKeyspaceEventWasMissed() {
+        profileAndOnline(12, 1, Set.of("support"));
+        UUID conversationId = UUID.randomUUID();
+        agentService.reserve(new ReserveRequest(conversationId, "support"));
+
+        redis.delete("reservation:" + conversationId);
+        redis.opsForZSet().add("reservation_expiry_index", conversationId.toString(), 0);
+        expiryReconciler.reconcile();
+
+        assertThat(agentService.reservation(conversationId).status()).isEqualTo("EXPIRED");
+        assertThat(agentService.online(12).currentConversations()).isZero();
+        assertThat(redis.opsForZSet().score("reservation_expiry_index", conversationId.toString())).isNull();
     }
 
     @Test
@@ -151,6 +193,37 @@ class AgentServiceIntegrationTest extends RedisIntegrationTest {
         AgentStateResponse online = agentService.online(6);
         assertThat(online.status()).isEqualTo("break");
         assertNotInPools(6, "support");
+    }
+
+    @Test
+    void dispatchesOldestCompatibleRequestAndFillsCapacity() {
+        UUID billingFirst = UUID.randomUUID();
+        UUID supportSecond = UUID.randomUUID();
+        UUID billingThird = UUID.randomUUID();
+        assertThat(agentService.reserve(new ReserveRequest(billingFirst, "billing")).status()).isEqualTo("WAITING");
+        assertThat(agentService.reserve(new ReserveRequest(supportSecond, "support")).status()).isEqualTo("WAITING");
+        assertThat(agentService.reserve(new ReserveRequest(billingThird, "billing")).status()).isEqualTo("WAITING");
+
+        profileAndOnline(8, 2, Set.of("support", "billing"));
+
+        assertThat(agentService.reservation(billingFirst).agentId()).isEqualTo(8L);
+        assertThat(agentService.reservation(supportSecond).agentId()).isEqualTo(8L);
+        assertThat(agentService.reservation(billingThird).status()).isEqualTo("WAITING");
+        assertThat(agentService.online(8).currentConversations()).isEqualTo(2);
+    }
+
+    @Test
+    void releaseImmediatelyDispatchesNextWaitingRequest() {
+        profileAndOnline(9, 1, Set.of("support"));
+        UUID active = UUID.randomUUID();
+        UUID waiting = UUID.randomUUID();
+        agentService.reserve(new ReserveRequest(active, "support"));
+        assertThat(agentService.reserve(new ReserveRequest(waiting, "support")).status()).isEqualTo("WAITING");
+
+        agentService.release(9, active);
+
+        assertThat(agentService.reservation(waiting).status()).isEqualTo("RESERVED");
+        assertThat(agentService.reservation(waiting).agentId()).isEqualTo(9L);
     }
 
     private void profileAndOnline(long agentId, int max, Set<String> skills) {

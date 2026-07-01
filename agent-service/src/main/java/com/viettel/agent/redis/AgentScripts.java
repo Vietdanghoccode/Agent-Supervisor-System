@@ -19,6 +19,10 @@ public class AgentScripts {
     private final DefaultRedisScript<List> reserve = script("redis/reserve.lua");
     private final DefaultRedisScript<List> confirm = script("redis/confirm.lua");
     private final DefaultRedisScript<List> release = script("redis/release.lua");
+    private final DefaultRedisScript<List> dispatchAgent = script("redis/dispatch-agent.lua");
+    private final DefaultRedisScript<List> requestStatus = script("redis/request-status.lua");
+    private final DefaultRedisScript<List> cancelRequest = script("redis/cancel-request.lua");
+    private final DefaultRedisScript<List> expireReservation = script("redis/expire-reservation.lua");
 
     public AgentScripts(StringRedisTemplate redis) {
         this.redis = redis;
@@ -44,16 +48,33 @@ public class AgentScripts {
         return execute(available, List.of(Long.toString(agentId)));
     }
 
-    public List<String> reserve(String conversationId, String skill, long ttlSeconds) {
-        return execute(reserve, List.of(conversationId, skill, Long.toString(ttlSeconds)));
+    public List<String> reserve(String conversationId, String skill, long ttlSeconds, long nowMillis) {
+        return execute(reserve, List.of(conversationId, skill, Long.toString(ttlSeconds), Long.toString(nowMillis)));
     }
 
-    public List<String> confirm(String conversationId) {
-        return execute(confirm, List.of(conversationId));
+    public List<String> confirm(String conversationId, long retentionSeconds) {
+        return execute(confirm, List.of(conversationId, Long.toString(retentionSeconds)));
     }
 
-    public List<String> release(long agentId, String conversationId) {
-        return execute(release, List.of(Long.toString(agentId), conversationId));
+    public List<String> release(long agentId, String conversationId, long retentionSeconds) {
+        return execute(release, List.of(Long.toString(agentId), conversationId, Long.toString(retentionSeconds)));
+    }
+
+    public List<String> dispatchAgent(long agentId, long ttlSeconds, long nowMillis) {
+        return execute(dispatchAgent, List.of(
+                Long.toString(agentId), Long.toString(ttlSeconds), Long.toString(nowMillis)));
+    }
+
+    public List<String> requestStatus(String conversationId) {
+        return execute(requestStatus, List.of(conversationId));
+    }
+
+    public List<String> cancelRequest(String conversationId, long retentionSeconds) {
+        return execute(cancelRequest, List.of(conversationId, Long.toString(retentionSeconds)));
+    }
+
+    public List<String> expireReservation(String conversationId, long retentionSeconds) {
+        return execute(expireReservation, List.of(conversationId, Long.toString(retentionSeconds)));
     }
 
     private List<String> execute(DefaultRedisScript<List> script, List<String> args) {

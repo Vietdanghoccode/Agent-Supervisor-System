@@ -32,8 +32,4 @@ public class AgentStateStore {
                 Integer.parseInt(values.get(2)),
                 Integer.parseInt(values.get(3)));
     }
-
-    public String reservationOwner(String conversationId) {
-        return redis.opsForValue().get("reservation_owner:" + conversationId);
-    }
 }

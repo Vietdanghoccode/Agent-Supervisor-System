@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
 
 @Validated
 @RestController
@@ -49,8 +50,11 @@ public class AgentController {
     }
 
     @PostMapping("/reserve")
-    public ReservationResponse reserve(@Valid @RequestBody ReserveRequest request) {
-        return agentService.reserve(request);
+    public ResponseEntity<ReservationResponse> reserve(@Valid @RequestBody ReserveRequest request) {
+        ReservationResponse response = agentService.reserve(request);
+        return "WAITING".equals(response.status())
+                ? ResponseEntity.accepted().body(response)
+                : ResponseEntity.ok(response);
     }
 
     @PostMapping("/{agentId}/release")

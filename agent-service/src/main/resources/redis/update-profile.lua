@@ -57,10 +57,4 @@ redis.call('SET', prefix .. 'max_conversations', tostring(requested_max))
 
 local state = redis.call('GET', prefix .. 'state')
 local status = redis.call('GET', prefix .. 'status')
-if state == 'online' and status == 'available' and current < requested_max then
-    for _, skill in ipairs(skills) do
-        redis.call('SADD', 'available_agents:' .. skill, agent_id)
-    end
-end
-
 return {'OK'}
