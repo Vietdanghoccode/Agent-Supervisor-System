@@ -46,6 +46,16 @@ app:
       lease-duration: ${OUTBOX_LEASE_DURATION:60s}
       retry-initial-delay: ${OUTBOX_RETRY_INITIAL_DELAY:1s}
       retry-max-delay: ${OUTBOX_RETRY_MAX_DELAY:60s}
+  assignment:
+    worker:
+      enabled: ${ASSIGNMENT_WORKER_ENABLED:false}
+      agent-service-url: ${AGENT_SERVICE_URL:http://agent-service}
+      default-skill: ${ASSIGNMENT_DEFAULT_SKILL:support}
+      poll-interval: ${ASSIGNMENT_POLL_INTERVAL:1s}
+      batch-size: ${ASSIGNMENT_BATCH_SIZE:50}
+      assigning-timeout: ${ASSIGNMENT_ASSIGNING_TIMEOUT:30s}
+      connect-timeout: ${ASSIGNMENT_CONNECT_TIMEOUT:2s}
+      read-timeout: ${ASSIGNMENT_READ_TIMEOUT:5s}
 
 management:
   endpoints:

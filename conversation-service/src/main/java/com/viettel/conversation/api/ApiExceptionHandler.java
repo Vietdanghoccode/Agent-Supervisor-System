@@ -1,6 +1,9 @@
 package com.viettel.conversation.api;
 
+import com.viettel.conversation.exception.AgentServiceException;
 import com.viettel.conversation.exception.BadRequestException;
+import com.viettel.conversation.exception.ConversationConflictException;
+import com.viettel.conversation.exception.ConversationNotFoundException;
 import com.viettel.conversation.exception.IdempotencyConflictException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -42,6 +45,21 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IdempotencyConflictException.class)
     ProblemDetail handleConflict(IdempotencyConflictException exception) {
         return problem(HttpStatus.CONFLICT, "Idempotency conflict", exception.getMessage());
+    }
+
+    @ExceptionHandler(ConversationNotFoundException.class)
+    ProblemDetail handleNotFound(ConversationNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Conversation not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(ConversationConflictException.class)
+    ProblemDetail handleConversationConflict(ConversationConflictException exception) {
+        return problem(HttpStatus.CONFLICT, "Conversation conflict", exception.getMessage());
+    }
+
+    @ExceptionHandler(AgentServiceException.class)
+    ProblemDetail handleAgentService(AgentServiceException exception) {
+        return problem(HttpStatus.BAD_GATEWAY, "Agent Service unavailable", exception.getMessage());
     }
 
     private ProblemDetail problem(HttpStatus status, String title, String detail) {

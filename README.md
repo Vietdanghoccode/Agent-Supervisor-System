@@ -13,4 +13,5 @@ Tài liệu triển khai gần nhất:
 
 - [Conversation Service giai đoạn 1](docs/conversation/phase-1-conversation-service.md)
 - [Outbox Publisher giai đoạn 2](docs/conversation/phase-2-outbox-publisher.md)
+- [Conversation Assignment Worker giai đoạn 3](docs/conversation/phase-3-assignment-worker.md)
 - [Agent Service + Redis giai đoạn 3](docs/agent/phase-3-agent-service-redis.md)

@@ -69,4 +69,22 @@ public class Conversation {
     public String getSkill() { return skill; }
     public String getRequestHash() { return requestHash; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+
+    public void markQueued(Instant now) {
+        this.status = ConversationStatus.QUEUED;
+        this.updatedAt = now;
+    }
+
+    public void markAssigned(Long agentId, Instant now) {
+        this.status = ConversationStatus.ASSIGNED;
+        this.agentId = agentId;
+        this.updatedAt = now;
+    }
+
+    public void markClosed(Instant now) {
+        this.status = ConversationStatus.CLOSED;
+        this.updatedAt = now;
+    }
 }

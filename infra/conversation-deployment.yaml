@@ -101,7 +101,7 @@ spec:
     spec:
       containers:
         - name: conversation-service
-          image: conversation-service:phase2-outbox
+          image: conversation-service:phase3-assignment
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8083
@@ -124,6 +124,12 @@ spec:
                   key: password
             - name: OPENAPI_SERVER_URL
               value: http://localhost:8080
+            - name: AGENT_SERVICE_URL
+              value: http://agent-service
+            - name: ASSIGNMENT_WORKER_ENABLED
+              value: "true"
+            - name: ASSIGNMENT_DEFAULT_SKILL
+              value: support
           readinessProbe:
             tcpSocket:
               port: 8083
@@ -165,7 +171,7 @@ spec:
     spec:
       containers:
         - name: outbox-publisher
-          image: conversation-service:phase2-outbox
+          image: conversation-service:phase3-assignment
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
