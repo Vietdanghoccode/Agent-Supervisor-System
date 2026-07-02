@@ -13,6 +13,7 @@ import com.viettel.conversation.exception.BadRequestException;
 import com.viettel.conversation.exception.ConversationConflictException;
 import com.viettel.conversation.exception.ConversationNotFoundException;
 import com.viettel.conversation.exception.IdempotencyConflictException;
+import com.viettel.conversation.exception.ForbiddenException;
 import com.viettel.conversation.repository.ConversationRepository;
 import com.viettel.conversation.repository.MessageRepository;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -25,22 +26,28 @@ public class ConversationService {
     private final ConversationCreationTransaction creationTransaction;
     private final IdempotencyFingerprint fingerprint;
     private final AgentServiceClient agentServiceClient;
+    private final ConversationMessagingService messagingService;
 
     public ConversationService(ConversationRepository conversationRepository,
                                MessageRepository messageRepository,
                                ConversationCreationTransaction creationTransaction,
                                IdempotencyFingerprint fingerprint,
-                               AgentServiceClient agentServiceClient) {
+                               AgentServiceClient agentServiceClient,
+                               ConversationMessagingService messagingService) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.creationTransaction = creationTransaction;
         this.fingerprint = fingerprint;
         this.agentServiceClient = agentServiceClient;
+        this.messagingService = messagingService;
     }
 
-    public CreateConversationResult create(String idempotencyKey, CreateConversationRequest request) {
+    public CreateConversationResult create(String idempotencyKey, RequestIdentity identity, CreateConversationRequest request) {
+        if (!"customer".equals(identity.role())) {
+            throw new ForbiddenException("Only customers can create conversations");
+        }
         validateIdempotencyKey(idempotencyKey);
-        NormalizedCreateRequest normalized = NormalizedCreateRequest.from(request);
+        NormalizedCreateRequest normalized = NormalizedCreateRequest.from(identity.userId(), request);
         String requestHash = fingerprint.calculate(normalized);
 
         return conversationRepository.findByIdempotencyKey(idempotencyKey)
@@ -48,9 +55,10 @@ public class ConversationService {
                 .orElseGet(() -> createOrResolveRace(idempotencyKey, requestHash, normalized));
     }
 
-    public ConversationResponse close(java.util.UUID conversationId) {
+    public ConversationResponse close(java.util.UUID conversationId, RequestIdentity identity) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ConversationNotFoundException("Conversation " + conversationId + " does not exist"));
+        messagingService.authorizeParticipant(conversation, identity);
         if (conversation.getStatus() == ConversationStatus.CLOSED) {
             return response(conversation);
         }

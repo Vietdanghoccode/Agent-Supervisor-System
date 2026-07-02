@@ -5,6 +5,7 @@ import com.viettel.conversation.exception.BadRequestException;
 import com.viettel.conversation.exception.ConversationConflictException;
 import com.viettel.conversation.exception.ConversationNotFoundException;
 import com.viettel.conversation.exception.IdempotencyConflictException;
+import com.viettel.conversation.exception.ForbiddenException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -55,6 +56,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConversationConflictException.class)
     ProblemDetail handleConversationConflict(ConversationConflictException exception) {
         return problem(HttpStatus.CONFLICT, "Conversation conflict", exception.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    ProblemDetail handleForbidden(ForbiddenException exception) {
+        return problem(HttpStatus.FORBIDDEN, "Forbidden", exception.getMessage());
     }
 
     @ExceptionHandler(AgentServiceException.class)

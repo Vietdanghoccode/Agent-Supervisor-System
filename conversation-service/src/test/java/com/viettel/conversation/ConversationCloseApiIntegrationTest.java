@@ -109,6 +109,8 @@ class ConversationCloseApiIntegrationTest extends PostgresIntegrationTest {
 
     private org.springframework.test.web.servlet.ResultActions close(UUID conversationId) throws Exception {
         return mockMvc.perform(post("/conversations/{conversationId}/close", conversationId)
+                .header("X-User-Id", "1")
+                .header("X-User-Role", "customer")
                 .contentType(MediaType.APPLICATION_JSON));
     }
 
@@ -126,10 +128,10 @@ class ConversationCloseApiIntegrationTest extends PostgresIntegrationTest {
                 "hash-" + conversationId, Timestamp.from(now), Timestamp.from(now));
         jdbcTemplate.update("""
                         INSERT INTO messages
-                            (id, conversation_id, sender_type, content, created_at)
-                        VALUES (?, ?, 'CUSTOMER', 'Tôi cần hỗ trợ', ?)
+                            (id, conversation_id, sender_type, sender_id, content, message_seq, created_at, updated_at)
+                        VALUES (?, ?, 'CUSTOMER', '1', 'Tôi cần hỗ trợ', 1, ?, ?)
                         """,
-                messageId, conversationId, Timestamp.from(now));
+                messageId, conversationId, Timestamp.from(now), Timestamp.from(now));
         return conversationId;
     }
 

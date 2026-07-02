@@ -71,15 +71,17 @@ class OutboxPublisherIntegrationTest extends PostgresIntegrationTest {
 
             String response = mockMvc.perform(post("/conversations")
                             .header("Idempotency-Key", "publish-1")
+                            .header("X-User-Id", "1")
+                            .header("X-User-Role", "customer")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"customerId":1,"message":"Help","channel":"webchat","skill":"support"}
+                                    {"clientMessageId":"publish-initial","message":"Help","channel":"webchat","skill":"support"}
                                     """))
                     .andExpect(status().isCreated())
                     .andReturn().getResponse().getContentAsString();
             String conversationId = objectMapper.readTree(response).get("id").asText();
             UUID expectedEventId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM outbox_events WHERE aggregate_id = ?", UUID.class,
+                    "SELECT id FROM outbox_events WHERE aggregate_id = ? AND event_type='ConversationCreated'", UUID.class,
                     UUID.fromString(conversationId));
 
             ConsumerRecord<String, String> record = pollEvent(
@@ -118,7 +120,7 @@ class OutboxPublisherIntegrationTest extends PostgresIntegrationTest {
                 INSERT INTO outbox_events
                     (id, aggregate_type, aggregate_id, event_type, payload, status,
                      created_at, published_at, attempt_count, next_attempt_at)
-                VALUES (?, 'Conversation', ?, 'MessageCreated', '{}'::jsonb, 'PENDING',
+                VALUES (?, 'Conversation', ?, 'UnsupportedEvent', '{}'::jsonb, 'PENDING',
                         ?, NULL, 0, ?)
                 """, eventId, aggregateId, Timestamp.from(now), Timestamp.from(now));
 

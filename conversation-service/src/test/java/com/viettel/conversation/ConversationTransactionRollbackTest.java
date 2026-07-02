@@ -3,6 +3,7 @@ package com.viettel.conversation;
 import com.viettel.conversation.api.CreateConversationRequest;
 import com.viettel.conversation.repository.OutboxEventRepository;
 import com.viettel.conversation.service.ConversationService;
+import com.viettel.conversation.service.RequestIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,8 +36,8 @@ class ConversationTransactionRollbackTest extends PostgresIntegrationTest {
         when(outboxEventRepository.save(any())).thenThrow(new RuntimeException("simulated outbox failure"));
 
         CreateConversationRequest request = new CreateConversationRequest(
-                1L, "Tôi cần hỗ trợ", "webchat", "support");
-        assertThatThrownBy(() -> conversationService.create("rollback-1", request))
+                "initial-rollback", "Tôi cần hỗ trợ", "webchat", "support");
+        assertThatThrownBy(() -> conversationService.create("rollback-1", new RequestIdentity(1, "customer"), request))
                 .hasMessageContaining("simulated outbox failure");
 
         assertThat(count("conversations")).isZero();

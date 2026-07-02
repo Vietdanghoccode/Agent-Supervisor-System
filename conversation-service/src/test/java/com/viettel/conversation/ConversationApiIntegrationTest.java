@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class ConversationApiIntegrationTest extends PostgresIntegrationTest {
     private static final String REQUEST = """
-            {"customerId":1,"message":"Tôi cần hỗ trợ","channel":" webchat ","skill":" support "}
+            {"clientMessageId":"initial-1","message":"Tôi cần hỗ trợ","channel":" webchat ","skill":" support "}
             """;
 
     @Autowired MockMvc mockMvc;
@@ -64,17 +64,17 @@ class ConversationApiIntegrationTest extends PostgresIntegrationTest {
         UUID conversationId = UUID.fromString(response.get("id").asText());
         assertThat(count("conversations")).isEqualTo(1);
         assertThat(count("messages")).isEqualTo(1);
-        assertThat(count("outbox_events")).isEqualTo(1);
+        assertThat(count("outbox_events")).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT conversation_id FROM messages", UUID.class)).isEqualTo(conversationId);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT agent_id FROM conversations", Long.class)).isNull();
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT event_type FROM outbox_events", String.class)).isEqualTo("ConversationCreated");
+                "SELECT event_type FROM outbox_events WHERE event_type='ConversationCreated'", String.class)).isEqualTo("ConversationCreated");
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT status FROM outbox_events", String.class)).isEqualTo("PENDING");
+                "SELECT status FROM outbox_events WHERE event_type='ConversationCreated'", String.class)).isEqualTo("PENDING");
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT payload->>'conversationId' FROM outbox_events", String.class))
+                "SELECT payload->>'conversationId' FROM outbox_events WHERE event_type='ConversationCreated'", String.class))
                 .isEqualTo(conversationId.toString());
     }
 
@@ -94,7 +94,7 @@ class ConversationApiIntegrationTest extends PostgresIntegrationTest {
     void rejectsSameKeyWithDifferentPayload() throws Exception {
         create("conflict-1", REQUEST).andExpect(status().isCreated());
         create("conflict-1", """
-                {"customerId":1,"message":"Nội dung khác","channel":"webchat","skill":"support"}
+                {"clientMessageId":"initial-1","message":"Nội dung khác","channel":"webchat","skill":"support"}
                 """)
                 .andExpect(status().isConflict())
                 .andExpect(header().string("Content-Type", "application/problem+json"))
@@ -111,7 +111,7 @@ class ConversationApiIntegrationTest extends PostgresIntegrationTest {
                 .andExpect(header().string("Content-Type", "application/problem+json"));
 
         create("invalid-1", """
-                {"customerId":0,"message":" ","channel":" "}
+                {"clientMessageId":" ","message":" ","channel":" "}
                 """)
                 .andExpect(status().isBadRequest())
                 .andExpect(header().string("Content-Type", "application/problem+json"));
@@ -163,6 +163,8 @@ class ConversationApiIntegrationTest extends PostgresIntegrationTest {
     private org.springframework.test.web.servlet.ResultActions create(String key, String body) throws Exception {
         return mockMvc.perform(post("/conversations")
                 .header("Idempotency-Key", key)
+                .header("X-User-Id", "1")
+                .header("X-User-Role", "customer")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
     }
@@ -194,7 +196,7 @@ class ConversationApiIntegrationTest extends PostgresIntegrationTest {
     private void assertSingleAggregate() {
         assertThat(count("conversations")).isEqualTo(1);
         assertThat(count("messages")).isEqualTo(1);
-        assertThat(count("outbox_events")).isEqualTo(1);
+        assertThat(count("outbox_events")).isEqualTo(2);
     }
 
     private int count(String table) {

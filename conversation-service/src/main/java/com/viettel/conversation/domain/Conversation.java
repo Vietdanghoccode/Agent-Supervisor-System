@@ -44,6 +44,12 @@ public class Conversation {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "last_message_seq", nullable = false)
+    private long lastMessageSeq;
+
+    @Column(name = "last_message_at")
+    private Instant lastMessageAt;
+
     protected Conversation() {
     }
 
@@ -59,6 +65,8 @@ public class Conversation {
         this.requestHash = requestHash;
         this.createdAt = now;
         this.updatedAt = now;
+        this.lastMessageSeq = 0;
+        this.lastMessageAt = null;
     }
 
     public UUID getId() { return id; }
@@ -71,6 +79,15 @@ public class Conversation {
     public Instant getCreatedAt() { return createdAt; }
 
     public Instant getUpdatedAt() { return updatedAt; }
+    public long getLastMessageSeq() { return lastMessageSeq; }
+    public Instant getLastMessageAt() { return lastMessageAt; }
+
+    public long appendMessage(Instant now) {
+        this.lastMessageSeq++;
+        this.lastMessageAt = now;
+        this.updatedAt = now;
+        return this.lastMessageSeq;
+    }
 
     public void markQueued(Instant now) {
         this.status = ConversationStatus.QUEUED;

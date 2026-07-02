@@ -59,11 +59,12 @@ public class OutboxEvent {
     protected OutboxEvent() {
     }
 
-    public OutboxEvent(UUID id, UUID aggregateId, String payload, Instant createdAt) {
+    public OutboxEvent(UUID id, String aggregateType, UUID aggregateId,
+                       String eventType, String payload, Instant createdAt) {
         this.id = id;
-        this.aggregateType = "Conversation";
+        this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
-        this.eventType = "ConversationCreated";
+        this.eventType = eventType;
         this.payload = payload;
         this.status = OutboxStatus.PENDING;
         this.createdAt = createdAt;

@@ -8,6 +8,14 @@ stringData:
   password: password
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: jwt-secret
+type: Opaque
+stringData:
+  secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: conversation-postgres-data
@@ -101,7 +109,7 @@ spec:
     spec:
       containers:
         - name: conversation-service
-          image: conversation-service:phase3-assignment
+          image: conversation-service:phase5-messaging
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8083
@@ -171,7 +179,7 @@ spec:
     spec:
       containers:
         - name: outbox-publisher
-          image: conversation-service:phase3-assignment
+          image: conversation-service:phase5-messaging
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -195,6 +203,8 @@ spec:
                   key: password
             - name: OUTBOX_PUBLISHER_ENABLED
               value: "true"
+            - name: OUTBOX_SUPPORTED_EVENT_TYPES
+              value: ConversationCreated,MessageCreated
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

@@ -39,7 +39,7 @@ app:
     publisher:
       enabled: ${OUTBOX_PUBLISHER_ENABLED:false}
       topic: ${OUTBOX_TOPIC:conversation.events}
-      supported-event-types: ${OUTBOX_SUPPORTED_EVENT_TYPES:ConversationCreated}
+      supported-event-types: ${OUTBOX_SUPPORTED_EVENT_TYPES:ConversationCreated,MessageCreated}
       poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
       metrics-interval: ${OUTBOX_METRICS_INTERVAL:10s}
       batch-size: ${OUTBOX_BATCH_SIZE:100}

@@ -22,6 +22,7 @@ class IdempotencyFingerprint {
     String calculate(NormalizedCreateRequest request) {
         Map<String, Object> canonicalPayload = new LinkedHashMap<>();
         canonicalPayload.put("customerId", request.customerId());
+        canonicalPayload.put("clientMessageId", request.clientMessageId());
         canonicalPayload.put("message", request.message());
         canonicalPayload.put("channel", request.channel());
         canonicalPayload.put("skill", request.skill());

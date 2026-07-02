@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.viettel.conversation.api.ConversationResponse;
 import com.viettel.conversation.domain.Conversation;
 import com.viettel.conversation.domain.Message;
+import com.viettel.conversation.domain.SenderType;
 import com.viettel.conversation.domain.OutboxEvent;
 import com.viettel.conversation.repository.ConversationRepository;
 import com.viettel.conversation.repository.MessageRepository;
@@ -46,25 +47,31 @@ class ConversationCreationTransaction {
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         UUID conversationId = UUID.randomUUID();
         UUID messageId = UUID.randomUUID();
-        UUID eventId = UUID.randomUUID();
+        UUID conversationEventId = UUID.randomUUID();
+        UUID messageEventId = UUID.randomUUID();
 
         Conversation conversation = new Conversation(conversationId, request.customerId(),
                 request.channel(), request.skill(), idempotencyKey, requestHash, now);
         conversationRepository.saveAndFlush(conversation);
 
-        Message message = new Message(messageId, conversationId, request.message(), now);
+        long sequence = conversation.appendMessage(now);
+        conversationRepository.save(conversation);
+        Message message = new Message(messageId, conversationId, SenderType.CUSTOMER,
+                request.customerId().toString(), request.clientMessageId(), request.message(),
+                "text/plain", sequence, now);
         messageRepository.save(message);
 
-        OutboxEvent event = new OutboxEvent(eventId, conversationId,
-                serializeEvent(eventId, conversationId, request, now), now);
-        outboxEventRepository.save(event);
+        outboxEventRepository.save(new OutboxEvent(conversationEventId, "Conversation", conversationId,
+                "ConversationCreated", serializeConversationEvent(conversationEventId, conversationId, request, now), now));
+        outboxEventRepository.save(new OutboxEvent(messageEventId, "Message", messageId,
+                "MessageCreated", serializeMessageEvent(messageEventId, message, now), now));
         outboxEventRepository.flush();
 
         return ConversationResponse.from(conversation, message);
     }
 
-    private String serializeEvent(UUID eventId, UUID conversationId,
-                                  NormalizedCreateRequest request, Instant occurredAt) {
+    private String serializeConversationEvent(UUID eventId, UUID conversationId,
+                                              NormalizedCreateRequest request, Instant occurredAt) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("eventId", eventId);
         payload.put("eventType", "ConversationCreated");
@@ -77,6 +84,27 @@ class ConversationCreationTransaction {
             return objectMapper.writeValueAsString(payload);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Cannot serialize ConversationCreated event", exception);
+        }
+    }
+
+    private String serializeMessageEvent(UUID eventId, Message message, Instant occurredAt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventId", eventId);
+        payload.put("eventType", "MessageCreated");
+        payload.put("messageId", message.getId());
+        payload.put("conversationId", message.getConversationId());
+        payload.put("senderType", message.getSenderType());
+        payload.put("senderId", message.getSenderId());
+        payload.put("clientMessageId", message.getClientMessageId());
+        payload.put("contentType", message.getContentType());
+        payload.put("content", message.getContent());
+        payload.put("messageSeq", message.getMessageSeq());
+        payload.put("status", message.getStatus());
+        payload.put("occurredAt", occurredAt);
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Cannot serialize MessageCreated event", exception);
         }
     }
 }
