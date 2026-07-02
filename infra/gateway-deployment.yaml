@@ -16,13 +16,20 @@ spec:
     spec:
       containers:
       - name: gateway
-        image: gateway-service:phase3-agent
+        image: gateway-service:phase5-messaging
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
         env:
         - name: AGENT_SERVICE_URL
           value: http://agent-service:80
+        - name: CONVERSATION_SERVICE_URL
+          value: http://conversation-service:80
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: secret
 
 ---
 apiVersion: v1
