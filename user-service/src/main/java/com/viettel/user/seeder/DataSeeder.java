@@ -2,6 +2,8 @@ package com.viettel.user.seeder;
 
 import com.viettel.user.entity.User;
 import com.viettel.user.repository.UserRepository;
+import com.viettel.user.repository.UserProfileRepository;
+import com.viettel.user.entity.UserProfile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -13,6 +15,8 @@ public class DataSeeder implements CommandLineRunner {
 
     @Autowired
     private UserRepository userRepository;
+    @Autowired
+    private UserProfileRepository userProfileRepository;
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -45,6 +49,9 @@ public class DataSeeder implements CommandLineRunner {
             userRepository.save(customer);
             userRepository.save(agent);
             userRepository.save(supervisor);
+            userProfileRepository.save(UserProfile.builder().userId(customer.getId()).displayName("Demo Customer").build());
+            userProfileRepository.save(UserProfile.builder().userId(agent.getId()).displayName("Demo Agent").build());
+            userProfileRepository.save(UserProfile.builder().userId(supervisor.getId()).displayName("Demo Supervisor").build());
 
             System.out.println("Seeding completed successfully.");
         }
