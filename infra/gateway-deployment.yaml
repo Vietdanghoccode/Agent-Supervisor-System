@@ -25,6 +25,8 @@ spec:
           value: http://agent-service:80
         - name: CONVERSATION_SERVICE_URL
           value: http://conversation-service:80
+        - name: EMAIL_SERVICE_URL
+          value: http://email-service:80
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
