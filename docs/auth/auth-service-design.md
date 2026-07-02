@@ -1,87 +1,71 @@
-# Auth Service Design
+# Auth Service: signup and invitation
 
-## Overview
-The `auth-service` is responsible for authenticating users and issuing JSON Web Tokens (JWT). It provides both an Access Token (short-lived) and a Refresh Token (long-lived) to securely manage user sessions across the microservices architecture. It delegates the retrieval of user credentials and roles to the `user-service`.
+Auth-service issues JWTs and orchestrates account provisioning. Credentials remain in user-service;
+auth-service hashes passwords with BCrypt and never persists raw passwords or invitation tokens.
 
-## Technologies Used
-- **Spring Boot**: Core framework
-- **Java 17**: Runtime environment
-- **Spring Security**: For endpoint security configuration and BCrypt password matching
-- **jjwt (JSON Web Token for Java)**: For creating and verifying JWTs
-- **Spring RestClient**: For synchronous inter-service communication with `user-service`
+## Public API
 
-## Token Strategy & RBAC
-- **Access Token**: Contains user identity claims including `userId` and `role`. It is short-lived (e.g., 1 hour).
-- **Refresh Token**: Used to obtain a new Access Token. It is long-lived (e.g., 24 hours).
-- **Role-Based Access Control (RBAC)**: Upon successful authentication, the token is populated with a `role` claim mapped from `roleId` in the `user-service`:
-  - `1` -> `customer`
-  - `2` -> `agent`
-  - `3` -> `supervisor`
-  
-Other microservices (like Chat Service or Agent State Service) decode this JWT to authorize specific API actions based on the user's role.
+### `POST /api/auth/signup/customer`
 
-## Endpoints
+```json
+{"email":"customer@example.com","password":"password123","displayName":"Customer"}
+```
 
-### 1. `POST /api/auth/login`
-Authenticates a user against the `user-service` database and returns an access token and refresh token containing their user ID and role.
+The server always creates role `CUSTOMER` and status `ACTIVE`. A successful response is `201` with
+`accessToken` and `refreshToken`. Duplicate email is `409`; validation errors are `400`.
 
-**Request Body:**
+### `POST /api/auth/invites`
+
+Requires a valid Supervisor bearer token.
+
 ```json
 {
-  "username": "user",
-  "password": "password"
+  "email":"agent@example.com",
+  "role":"AGENT",
+  "teams":["support"],
+  "permissions":[]
 }
 ```
 
-**Response Body:**
+For `SUPERVISOR`, `permissions` contains the management permission codes assigned on acceptance.
+The response is `201` with invite metadata. The random token is SHA-256 hashed before persistence;
+the raw value exists only in the frontend link sent by email. Invites expire after 24 hours.
+
+### `POST /api/auth/invites/{inviteId}/resend`
+
+Requires Supervisor. It rotates the token, invalidates the previous link, resets the 24-hour expiry,
+and sends a new email. Only `PENDING` invites can be resent.
+
+### `POST /api/auth/invites/accept`
+
+Agent example:
+
 ```json
 {
-  "accessToken": "eyJhb...",
-  "refreshToken": "eyJhb..."
+  "token":"raw-token-from-email",
+  "password":"password123",
+  "displayName":"Support Agent",
+  "maxConversations":3,
+  "skills":["support"],
+  "channels":["webchat"]
 }
 ```
 
-### 2. `POST /api/auth/refresh`
-Generates a new access token and refresh token using an existing valid refresh token.
+Teams are intentionally absent: they come from the invite. Supervisor acceptance uses the common
+`token`, `password`, and `displayName` fields; its teams and permissions also come from the invite.
+A successful response contains access and refresh tokens. Invalid tokens return `404`, and expired or
+consumed tokens return `410`.
 
-**Request Body:**
-```json
-{
-  "refreshToken": "eyJhb..."
-}
-```
+## Provisioning sequences
 
-**Response Body:**
-```json
-{
-  "accessToken": "eyJhb...",
-  "refreshToken": "eyJhb..."
-}
-```
+Customer: client -> auth -> user-service account/profile -> JWT response.
 
-### 3. `GET /api/auth/validate`
-Validates an access token.
+Agent: Supervisor -> auth invite -> user-service hashed invite -> email-service -> Agent accepts ->
+user-service account/profile -> agent-service profile -> finalize response. The account ID is the agent
+ID. If agent-service fails, user-service removes the new account/profile and reopens the invite.
 
-**Query Parameter:** `token` (String)
+Supervisor: Supervisor -> auth invite -> email-service -> acceptance -> user-service atomically creates
+account/profile and team/permission assignment -> JWT response.
 
-**Response:**
-- `200 OK`: Token is valid.
-- `401 Unauthorized`: Token is invalid or expired.
-
-## Kubernetes Deployment
-The service is containerized using Docker and deployed using Kubernetes.
-
-### Build Docker Image
-```bash
-cd auth-service
-./mvnw clean package -DskipTests
-docker build -t auth-service:latest .
-```
-
-### Deploy to Cluster
-Apply the Kubernetes manifests from the `infra/` directory:
-```bash
-kubectl apply -f infra/auth-deployment.yaml
-```
-
-The service will be available within the cluster at `http://auth-service:8081`. The API Gateway can be configured to route authentication requests to this service.
+All successfully provisioned accounts are `ACTIVE`. Email delivery failure is reported as `502`; the
+pending invite can be recovered with resend.

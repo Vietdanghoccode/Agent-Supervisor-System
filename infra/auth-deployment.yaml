@@ -26,6 +26,14 @@ spec:
             secretKeyRef:
               name: jwt-secret
               key: secret
+        - name: USER_SERVICE_URL
+          value: http://user-service:80
+        - name: AGENT_SERVICE_URL
+          value: http://agent-service:80
+        - name: EMAIL_SERVICE_URL
+          value: http://email-service:80
+        - name: INVITE_ACCEPT_BASE_URL
+          value: http://localhost:3000/accept-invite
 ---
 apiVersion: v1
 kind: Service

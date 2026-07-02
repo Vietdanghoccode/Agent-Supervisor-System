@@ -13,6 +13,13 @@ jwt:
 app:
   user-service:
     url: ${USER_SERVICE_URL:http://user-service:80}
+  agent-service:
+    url: ${AGENT_SERVICE_URL:http://agent-service:80}
+  email-service:
+    url: ${EMAIL_SERVICE_URL:http://email-service:80}
+  invite:
+    accept-base-url: ${INVITE_ACCEPT_BASE_URL:http://localhost:3000/accept-invite}
+    ttl: ${INVITE_TTL:24h}
 
 springdoc:
   api-docs:
