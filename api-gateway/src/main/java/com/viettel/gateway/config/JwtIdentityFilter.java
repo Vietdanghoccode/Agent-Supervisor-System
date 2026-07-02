@@ -30,7 +30,9 @@ public class JwtIdentityFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
-        if (!path.startsWith("/conversations") && !path.startsWith("/conversation/agent")) {
+        boolean protectedInvite = path.equals("/api/auth/invites")
+                || (path.startsWith("/api/auth/invites/") && path.endsWith("/resend"));
+        if (!path.startsWith("/conversations") && !path.startsWith("/conversation/agent") && !protectedInvite) {
             return chain.filter(stripIdentity(exchange));
         }
         String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);

@@ -34,6 +34,12 @@ spring:
                 - Path=/api/agent/v3/api-docs
               filters:
                 - RewritePath=/api/agent/v3/api-docs, /v3/api-docs
+            - id: email-service-api-docs-route
+              uri: ${EMAIL_SERVICE_URL:http://email-service:80}
+              predicates:
+                - Path=/api/email/v3/api-docs
+              filters:
+                - RewritePath=/api/email/v3/api-docs, /v3/api-docs
             # --- General service routes ---
             - id: user-service-route
               uri: ${USER_SERVICE_URL:http://user-service:80}
@@ -72,6 +78,8 @@ springdoc:
         url: /api/conversation/v3/api-docs
       - name: agent-service
         url: /api/agent/v3/api-docs
+      - name: email-service
+        url: /api/email/v3/api-docs
 
 jwt:
   secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}

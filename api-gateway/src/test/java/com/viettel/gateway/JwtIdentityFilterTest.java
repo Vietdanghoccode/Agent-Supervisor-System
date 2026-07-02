@@ -58,4 +58,16 @@ class JwtIdentityFilterTest {
         filter.filter(expiredExchange, request -> Mono.empty()).block();
         assertThat(expiredExchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
+
+    @Test
+    void protectsInviteCreationButLeavesAcceptancePublic() {
+        MockServerWebExchange create = MockServerWebExchange.from(MockServerHttpRequest.post("/api/auth/invites"));
+        filter.filter(create, request -> Mono.empty()).block();
+        assertThat(create.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        MockServerWebExchange accept = MockServerWebExchange.from(MockServerHttpRequest.post("/api/auth/invites/accept"));
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+        filter.filter(accept, request -> { forwarded.set(request); return Mono.empty(); }).block();
+        assertThat(forwarded.get()).isNotNull();
+    }
 }
