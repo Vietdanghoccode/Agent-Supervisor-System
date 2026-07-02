@@ -47,6 +47,10 @@ spring:
               uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:80}
               predicates:
                 - Path=/conversations/**
+            - id: agent-conversation-service-route
+              uri: ${CONVERSATION_SERVICE_URL:http://conversation-service:80}
+              predicates:
+                - Path=/conversation/agent/**
             - id: agent-service-route
               uri: ${AGENT_SERVICE_URL:http://agent-service:80}
               predicates:
@@ -68,3 +72,6 @@ springdoc:
         url: /api/conversation/v3/api-docs
       - name: agent-service
         url: /api/agent/v3/api-docs
+
+jwt:
+  secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
